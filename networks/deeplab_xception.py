@@ -20,11 +20,11 @@ class SeparableConv2d(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, inplanes, planes, reps, stride=1, start_with_relu=True, grow_first=True):
+    def __init__(self, inplanes, planes, reps, stride=1, start_with_relu=True, grow_first=True, fix_size=False):
         super(Block, self).__init__()
 
         if planes != inplanes or stride != 1:
-            self.skip = nn.Conv2d(inplanes, planes, 1, stride=stride, bias=False)
+            self.skip = nn.Conv2d(inplanes, planes, 1, stride=1 if fix_size else stride, bias=False)
             self.skipbn = nn.BatchNorm2d(planes)
         else:
             self.skip = None
@@ -53,7 +53,10 @@ class Block(nn.Module):
             rep = rep[1:]
 
         if stride != 1:
-            rep.append(SeparableConv2d(planes, planes, 3, stride=2, padding=1))
+            if fix_size:
+                rep.append(SeparableConv2d(planes, planes, 3, stride=1, padding=2, dilation=2))
+            else:
+                rep.append(SeparableConv2d(planes, planes, 3, stride=2, padding=1))
         self.rep = nn.Sequential(*rep)
 
     def forward(self, inp):
@@ -77,11 +80,11 @@ class Xception(nn.Module):
         super(Xception, self).__init__()
 
         # Entry flow
-        self.conv1 = nn.Conv2d(inplanes, 32, 3, stride=2, bias=False)
+        self.conv1 = nn.Conv2d(inplanes, 32, 3, stride=2, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(32)
         self.relu = nn.ReLU(inplace=True)
 
-        self.conv2 = nn.Conv2d(32, 64, 3, bias=False)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(64)
 
         self.block1 = Block(64, 128, reps=2, stride=2, start_with_relu=False)
@@ -107,15 +110,15 @@ class Xception(nn.Module):
         self.block19 = Block(728, 728, reps=3, stride=1, start_with_relu=True, grow_first=True)
 
         # Exit flow
-        self.block20 = Block(728, 1024, reps=2, stride=2, start_with_relu=True, grow_first=False)
+        self.block20 = Block(728, 1024, reps=2, stride=2, start_with_relu=True, grow_first=False, fix_size=True)
 
-        self.conv3 = SeparableConv2d(1024, 1536, 3, stride=1, padding=1)
+        self.conv3 = SeparableConv2d(1024, 1536, 3, stride=1, padding=2, dilation=2)
         self.bn3 = nn.BatchNorm2d(1536)
 
-        self.conv4 = SeparableConv2d(1536, 1536, 3, stride=1, padding=1)
+        self.conv4 = SeparableConv2d(1536, 1536, 3, stride=1, padding=2, dilation=2)
         self.bn4 = nn.BatchNorm2d(1536)
 
-        self.conv5 = SeparableConv2d(1536, 2048, 3, stride=1, padding=1)
+        self.conv5 = SeparableConv2d(1536, 2048, 3, stride=1, padding=2, dilation=2)
         self.bn5 = nn.BatchNorm2d(2048)
 
         # init weights
@@ -135,8 +138,9 @@ class Xception(nn.Module):
         x = self.relu(x)
 
         x = self.block1(x)
-        x = self.block2(x)
         low_level_feat = x
+        x = self.block2(x)
+        # low_level_feat = x
         x = self.block3(x)
 
         # Middle flow
@@ -269,7 +273,7 @@ class DeepLabv3_plus(nn.Module):
         self.bn1 = nn.BatchNorm2d(256)
 
         # adopt [1x1, 48] for channel reduction.
-        self.conv2 = nn.Conv2d(256, 48, 1)
+        self.conv2 = nn.Conv2d(128, 48, 1)
         self.bn2 = nn.BatchNorm2d(48)
 
         self.last_conv = nn.Sequential(nn.Conv2d(304, 256, kernel_size=3, stride=1, padding=1),
@@ -339,7 +343,7 @@ def get_10x_lr_params(model):
 
 if __name__ == "__main__":
     model = DeepLabv3_plus(nInputChannels=3, n_classes=21, pretrained=True, _print=True).cuda()
-    image = torch.randn(1, 3, 513, 513).cuda()
+    image = torch.randn(1, 3, 512, 512).cuda()
     # According to paper, encoder output stride is 16,
     # Therefore, final output size is 256 (16*16).
     with torch.no_grad():
