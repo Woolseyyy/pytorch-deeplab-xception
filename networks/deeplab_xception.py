@@ -54,7 +54,7 @@ class Block(nn.Module):
 
         if stride != 1:
             if fix_size:
-                rep.append(SeparableConv2d(planes, planes, 3, stride=1, padding=2, dilation=2))
+                rep.append(SeparableConv2d(planes, planes, 3, stride=1, padding=1))
             else:
                 rep.append(SeparableConv2d(planes, planes, 3, stride=2, padding=1))
         self.rep = nn.Sequential(*rep)
