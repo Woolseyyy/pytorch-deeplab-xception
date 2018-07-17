@@ -31,8 +31,8 @@ nEpochs = 300  # Number of epochs for training
 resume_epoch = 0  # Default is 0, change if want to resume
 
 p = OrderedDict()  # Parameters to include in report
-p['trainBatch'] = 8  # Training batch size
-testBatch = 8  # Testing batch size
+p['trainBatch'] = 6  # Training batch size
+testBatch = 6  # Testing batch size
 useTest = True  # See evolution of the test set when training
 nTestInterval = 10  # Run on test set every nTestInterval epochs
 snapshot = 50  # Store a model every snapshot epochs
@@ -81,13 +81,13 @@ if resume_epoch != nEpochs:
     p['optimizer'] = str(optimizer)
 
     composed_transforms_tr = transforms.Compose([
-        tr.RandomResizedCrop(size=513, scale=(0.5, 1.0)),
+        tr.RandomResizedCrop(size=512, scale=(0.5, 1.0)),
         tr.RandomHorizontalFlip(),
         tr.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(1.0, 1.0, 1.0)),
         tr.ToTensor()])
 
     composed_transforms_ts = transforms.Compose([
-        tr.FixedResize(size=513),
+        tr.FixedResize(size=512),
         tr.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(1.0, 1.0, 1.0)),
         tr.ToTensor()])
 
@@ -132,7 +132,7 @@ if resume_epoch != nEpochs:
                 inputs, gts = inputs.cuda(), gts.cuda()
 
             output = net.forward(inputs)
-            output = upsample(output, size=(513, 513), mode='bilinear', align_corners=True)
+            # output = upsample(output, size=(513, 513), mode='bilinear', align_corners=True)
 
             loss = criterion(output, gts, size_average=False, batch_average=True)
             running_loss_tr += loss.item()
@@ -177,7 +177,7 @@ if resume_epoch != nEpochs:
 
                 with torch.no_grad():
                     output = net.forward(inputs)
-                output = upsample(output, size=(513, 513), mode='bilinear', align_corners=True)
+                # output = upsample(output, size=(513, 513), mode='bilinear', align_corners=True)
 
                 loss = criterion(output, gts, size_average=False, batch_average=True)
                 running_loss_ts += loss.item()
