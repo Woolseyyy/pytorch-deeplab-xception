@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import torch.utils.model_zoo as model_zoo
 
 
-
 class SeparableConv2d(nn.Module):
     def __init__(self, inplanes, planes, kernel_size=3, stride=1, padding=0, dilation=1, bias=False):
         super(SeparableConv2d, self).__init__()
@@ -20,36 +19,12 @@ class SeparableConv2d(nn.Module):
         return x
 
 
-def fixed_padding(inputs, kernel_size, rate):
-    kernel_size_effective = kernel_size + (kernel_size - 1) * (rate - 1)
-    pad_total = kernel_size_effective - 1
-    pad_beg = pad_total // 2
-    pad_end = pad_total - pad_beg
-    padded_inputs = F.pad(inputs, (pad_beg, pad_end, pad_beg, pad_end))
-    return padded_inputs
-
-
-class SeparableConv2d_same(nn.Module):
-    def __init__(self, inplanes, planes, kernel_size=3, stride=1, dilation=1, bias=False):
-        super(SeparableConv2d_same, self).__init__()
-
-        self.conv1 = nn.Conv2d(inplanes, inplanes, kernel_size, stride, 0, dilation,
-                               groups=inplanes, bias=bias)
-        self.pointwise = nn.Conv2d(inplanes, planes, 1, 1, 0, 1, 1, bias=bias)
-
-    def forward(self, x):
-        x = fixed_padding(x, self.conv1.kernel_size[0], rate=self.conv1.dilation[0])
-        x = self.conv1(x)
-        x = self.pointwise(x)
-        return x
-
-
 class Block(nn.Module):
-    def __init__(self, inplanes, planes, reps, stride=1, dilation=1, start_with_relu=True, grow_first=True):
+    def __init__(self, inplanes, planes, reps, stride=1, start_with_relu=True, grow_first=True, fix_size=False):
         super(Block, self).__init__()
 
         if planes != inplanes or stride != 1:
-            self.skip = nn.Conv2d(inplanes, planes, 1, stride=stride, bias=False)
+            self.skip = nn.Conv2d(inplanes, planes, 1, stride=1 if fix_size else stride, bias=False)
             self.skipbn = nn.BatchNorm2d(planes)
         else:
             self.skip = None
@@ -60,26 +35,28 @@ class Block(nn.Module):
         filters = inplanes
         if grow_first:
             rep.append(self.relu)
-            rep.append(SeparableConv2d_same(inplanes, planes, 3, stride=1, dilation=dilation, bias=False))
+            rep.append(SeparableConv2d(inplanes, planes, 3, stride=1, padding=1, bias=False))
             rep.append(nn.BatchNorm2d(planes))
             filters = planes
 
         for i in range(reps - 1):
             rep.append(self.relu)
-            rep.append(SeparableConv2d_same(filters, filters, 3, stride=1, dilation=dilation, bias=False))
+            rep.append(SeparableConv2d(filters, filters, 3, stride=1, padding=1, bias=False))
             rep.append(nn.BatchNorm2d(filters))
 
         if not grow_first:
             rep.append(self.relu)
-            rep.append(SeparableConv2d_same(inplanes, planes, 3, stride=1, dilation=dilation, bias=False))
+            rep.append(SeparableConv2d(inplanes, planes, 3, stride=1, padding=1, bias=False))
             rep.append(nn.BatchNorm2d(planes))
 
         if not start_with_relu:
             rep = rep[1:]
 
         if stride != 1:
-            rep.append(SeparableConv2d_same(planes, planes, 3, stride=2))
-
+            if fix_size:
+                rep.append(SeparableConv2d(planes, planes, 3, stride=1, padding=2, dilation=2))
+            else:
+                rep.append(SeparableConv2d(planes, planes, 3, stride=2, padding=1))
         self.rep = nn.Sequential(*rep)
 
     def forward(self, inp):
@@ -92,7 +69,6 @@ class Block(nn.Module):
             skip = inp
 
         x += skip
-
         return x
 
 
@@ -108,7 +84,7 @@ class Xception(nn.Module):
         self.bn1 = nn.BatchNorm2d(32)
         self.relu = nn.ReLU(inplace=True)
 
-        self.conv2 = nn.Conv2d(32, 64, 3, stride=1, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(64)
 
         self.block1 = Block(64, 128, reps=2, stride=2, start_with_relu=False)
@@ -134,15 +110,15 @@ class Xception(nn.Module):
         self.block19 = Block(728, 728, reps=3, stride=1, start_with_relu=True, grow_first=True)
 
         # Exit flow
-        self.block20 = Block(728, 1024, reps=2, stride=1, dilation=2, start_with_relu=True, grow_first=False)
+        self.block20 = Block(728, 1024, reps=2, stride=2, start_with_relu=True, grow_first=False, fix_size=True)
 
-        self.conv3 = SeparableConv2d_same(1024, 1536, 3, stride=1, dilation=2)
+        self.conv3 = SeparableConv2d(1024, 1536, 3, stride=1, padding=2, dilation=2)
         self.bn3 = nn.BatchNorm2d(1536)
 
-        self.conv4 = SeparableConv2d_same(1536, 1536, 3, stride=1, dilation=2)
+        self.conv4 = SeparableConv2d(1536, 1536, 3, stride=1, padding=2, dilation=2)
         self.bn4 = nn.BatchNorm2d(1536)
 
-        self.conv5 = SeparableConv2d_same(1536, 2048, 3, stride=1, dilation=2)
+        self.conv5 = SeparableConv2d(1536, 2048, 3, stride=1, padding=2, dilation=2)
         self.bn5 = nn.BatchNorm2d(2048)
 
         # init weights
@@ -164,6 +140,7 @@ class Xception(nn.Module):
         x = self.block1(x)
         low_level_feat = x
         x = self.block2(x)
+        # low_level_feat = x
         x = self.block3(x)
 
         # Middle flow
@@ -217,6 +194,8 @@ class Xception(nn.Module):
 
         for k, v in pretrain_dict.items():
             if k in state_dict:
+                # if 'bn' in k:
+                #     continue
                 if 'pointwise' in k:
                     v = v.unsqueeze(-1).unsqueeze(-1)
                 if k.startswith('block12'):
@@ -365,10 +344,11 @@ def get_10x_lr_params(model):
 if __name__ == "__main__":
     model = DeepLabv3_plus(nInputChannels=3, n_classes=21, pretrained=True, _print=True).cuda()
     image = torch.randn(1, 3, 512, 512).cuda()
+    # According to paper, encoder output stride is 16,
+    # Therefore, final output size is 256 (16*16).
     with torch.no_grad():
         output = model.forward(image)
     print(output.size())
-
 
 
 
